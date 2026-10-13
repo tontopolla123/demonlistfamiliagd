@@ -185,53 +185,29 @@ export default function Home() {
     } else {
       setProfiles((peopleRes.data ?? []) as Profile[]);
     }
-if (completionRes.error) {
-  console.error('Error al cargar récords:', completionRes.error);
-  setCompletions([]);
-  setMessage('Error al cargar récords: ' + completionRes.error.message);
-} else {
-  const rows = (completionRes.data ?? []) as Completion[];
 
-  console.log('URL de Supabase:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-  console.log('Error de récords:', completionRes.error);
-  console.log('Total de récords:', rows.length);
-  console.log(
-    'Récords aprobados:',
-    rows.filter((record) => record.status === 'approved').length
-  );
-  console.log('Primer récord:', rows[0]);
-  console.log(
-    'Primeros user_id:',
-    rows.slice(0, 5).map((record) => record.user_id)
-  );
-  console.log(
-    'IDs de perfiles:',
-    (peopleRes.data ?? []).slice(0, 5).map((profile) => profile.id)
-  );
+    if (completionRes.error) {
+      console.error('Error al cargar récords:', completionRes.error);
+      setCompletions([]);
+      setMessage('Error al cargar récords: ' + completionRes.error.message);
+    } else {
+      const rows = (completionRes.data ?? []) as Completion[];
 
-  setCompletions(rows);
-}
-console.log('URL de Supabase:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-console.log('Error de récords:', completionRes.error);
-console.log('Total de récords:', rows.length);
-console.log(
-  'Récords aprobados:',
-  rows.filter((record) => record.status === 'approved').length
-);
-console.log('Primer récord:', rows[0]);
-console.log(
-  'Primeros user_id:',
-  rows.slice(0, 5).map((record) => record.user_id)
-);
-console.log(
-  'IDs de perfiles:',
-  profiles.slice(0, 5).map((profile) => profile.id)
-);
-
-      console.log('Récords recibidos desde Supabase:', rows.length);
+      console.log('URL de Supabase:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+      console.log('Error de récords:', completionRes.error);
+      console.log('Total de récords:', rows.length);
       console.log(
         'Récords aprobados:',
         rows.filter((record) => record.status === 'approved').length
+      );
+      console.log('Primer récord:', rows[0]);
+      console.log(
+        'Primeros user_id:',
+        rows.slice(0, 5).map((record) => record.user_id)
+      );
+      console.log(
+        'IDs de perfiles:',
+        (peopleRes.data ?? []).slice(0, 5).map((profile) => profile.id)
       );
 
       setCompletions(rows);
@@ -243,10 +219,6 @@ console.log(
       setSuggestions((suggestionRes.data ?? []) as Suggestion[]);
     }
   }, [supabase]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   async function signOut() {
     await supabase.auth.signOut();

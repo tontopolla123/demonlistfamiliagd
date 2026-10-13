@@ -15,11 +15,7 @@ type Level = {
   created_at: string;
 };
 
-type Profile = {
-  id: string;
-  username: string | null;
-  role: string;
-};
+type Profile = { id: string; username: string | null; role: string };
 
 type Completion = {
   id: string;
@@ -34,7 +30,7 @@ type Completion = {
   levels?: { name: string } | null;
 };
 
-type LevelSuggestion = {
+type Suggestion = {
   id: string;
   submitted_by: string;
   name: string;
@@ -45,6 +41,7 @@ type LevelSuggestion = {
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
 };
+
 type AredlLevel = {
   aredl_id: string;
   name: string;
@@ -52,6 +49,7 @@ type AredlLevel = {
   gd_level_id: string | null;
   points: number | null;
 };
+
 const DIFFICULTIES = [
   'Easy Demon',
   'Medium Demon',
@@ -60,7 +58,8 @@ const DIFFICULTIES = [
   'Extreme Demon',
 ];
 
-const tagClass = (d: string) => d.toLowerCase().split(' ')[0];
+const tagClass = (difficulty: string) =>
+  difficulty.toLowerCase().split(' ')[0];
 
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
@@ -72,14 +71,16 @@ export default function Home() {
   const [levels, setLevels] = useState<Level[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [completions, setCompletions] = useState<Completion[]>([]);
-  const [suggestions, setSuggestions] = useState<LevelSuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
 
-  const [tab, setTab] = useState<
-    'ranking' | 'players' | 'records' | 'admin'
-  >('ranking');
-
+  const [tab, setTab] = useState<'ranking' | 'players' | 'records' | 'admin'>('ranking');
   const [search, setSearch] = useState('');
   const [levelSearch, setLevelSearch] = useState('');
+  const [selectedLevel, setSelectedLevel] = useState('');
+  const [proof, setProof] = useState('');
+  const [attempts, setAttempts] = useState('');
+  const [notes, setNotes] = useState('');
+
   const [showProposal, setShowProposal] = useState(false);
   const [proposalCreator, setProposalCreator] = useState('');
   const [proposalDifficulty, setProposalDifficulty] = useState('Extreme Demon');
@@ -95,10 +96,16 @@ export default function Home() {
   const [gdUrl, setGdUrl] = useState('');
   const [imageUrl, setImageUrl] = useState('');
 
-  const [selectedLevel, setSelectedLevel] = useState('');
-  const [proof, setProof] = useState('');
-  const [attempts, setAttempts] = useState('');
-  const [notes, setNotes] = useState('');
+  const [editingLevelId, setEditingLevelId] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editCreator, setEditCreator] = useState('');
+  const [editDifficulty, setEditDifficulty] = useState('Easy Demon');
+  const [editGdUrl, setEditGdUrl] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [editPosition, setEditPosition] = useState('');
+
+  const [manualPlayerId, setManualPlayerId] = useState('');
+  const [manualLevelId, setManualLevelId] = useState('');
 
   const [importingAredl, setImportingAredl] = useState(false);
   const [aredlMessage, setAredlMessage] = useState('');
@@ -106,72 +113,134 @@ export default function Home() {
   const [aredlResults, setAredlResults] = useState<AredlLevel[]>([]);
   const [searchingAredl, setSearchingAredl] = useState(false);
   const [selectedAredl, setSelectedAredl] = useState<AredlLevel | null>(null);
+
+  // Carga los datos de Supabase.
+  // Los récords se consultan sin relaciones anidadas para evitar
+  // que un problema de relaciones impida cargar el ranking.
   const load = useCallback(async () => {
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser();
+
+    if (authError) {
+      console.error('Error de autenticación:', authError.message);
+    }
 
     setUserId(user?.id || '');
     setEmail(user?.email || '');
 
-    const [profileRes, levelRes, peopleRes, completionRes, suggestionRes] =
-      await Promise.all([
-        user
-          ? supabase
-              .from('profiles')
-              .select('id,username,role')
-              .eq('id', user.id)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
+    const [
+      profileRes,
+      levelRes,
+      peopleRes,
+      completionRes,
+      suggestionRes,
+    ] = await Promise.all([
+      user
+        ? supabase
+            .from('profiles')
+            .select('id,username,role')
+            .eq('id', user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
 
-        supabase
-          .from('levels')
-          .select('*')
-          .order('position', { ascending: true }),
+      supabase
+        .from('levels')
+        .select('*')
+        .order('position', { ascending: true }),
 
-        supabase
-          .from('profiles')
-          .select('id,username,role')
-          .order('username'),
+      supabase
+        .from('profiles')
+        .select('id,username,role')
+        .order('username'),
 
-        supabase
-          .from('completions')
-          .select(
-            'id,user_id,level_id,status,proof_url,attempts,notes,created_at,profiles(username),levels(name)'
-          )
-          .order('created_at', { ascending: false }),
+      supabase
+        .from('completions')
+        .select(
+          'id,user_id,level_id,status,proof_url,attempts,notes,created_at'
+        )
+        .order('created_at', { ascending: false }),
 
-        user
-          ? supabase
-              .from('level_suggestions')
-              .select('*')
-              .order('created_at', { ascending: false })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      user
+        ? supabase
+            .from('level_suggestions')
+            .select('*')
+            .order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+    ]);
 
     setIsAdmin(profileRes.data?.role === 'admin');
 
     if (levelRes.error) {
+      console.error('Error al cargar niveles:', levelRes.error);
       setMessage('Error al cargar niveles: ' + levelRes.error.message);
-    } else if (levelRes.data) {
-      setLevels(levelRes.data as Level[]);
+    } else {
+      setLevels((levelRes.data ?? []) as Level[]);
     }
 
-    if (peopleRes.data) {
-      setProfiles(peopleRes.data as Profile[]);
+    if (peopleRes.error) {
+      console.error('Error al cargar jugadores:', peopleRes.error);
+      setMessage('Error al cargar jugadores: ' + peopleRes.error.message);
+    } else {
+      setProfiles((peopleRes.data ?? []) as Profile[]);
     }
+if (completionRes.error) {
+  console.error('Error al cargar récords:', completionRes.error);
+  setCompletions([]);
+  setMessage('Error al cargar récords: ' + completionRes.error.message);
+} else {
+  const rows = (completionRes.data ?? []) as Completion[];
 
-    if (completionRes.data) {
-      setCompletions(completionRes.data as unknown as Completion[]);
-    }
+  console.log('URL de Supabase:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log('Error de récords:', completionRes.error);
+  console.log('Total de récords:', rows.length);
+  console.log(
+    'Récords aprobados:',
+    rows.filter((record) => record.status === 'approved').length
+  );
+  console.log('Primer récord:', rows[0]);
+  console.log(
+    'Primeros user_id:',
+    rows.slice(0, 5).map((record) => record.user_id)
+  );
+  console.log(
+    'IDs de perfiles:',
+    (peopleRes.data ?? []).slice(0, 5).map((profile) => profile.id)
+  );
 
-    if (suggestionRes.data) {
-      setSuggestions(suggestionRes.data as LevelSuggestion[]);
-    } else if (suggestionRes.error) {
-      console.error(
-        'Error al cargar propuestas:',
-        suggestionRes.error.message
+  setCompletions(rows);
+}
+console.log('URL de Supabase:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log('Error de récords:', completionRes.error);
+console.log('Total de récords:', rows.length);
+console.log(
+  'Récords aprobados:',
+  rows.filter((record) => record.status === 'approved').length
+);
+console.log('Primer récord:', rows[0]);
+console.log(
+  'Primeros user_id:',
+  rows.slice(0, 5).map((record) => record.user_id)
+);
+console.log(
+  'IDs de perfiles:',
+  profiles.slice(0, 5).map((profile) => profile.id)
+);
+
+      console.log('Récords recibidos desde Supabase:', rows.length);
+      console.log(
+        'Récords aprobados:',
+        rows.filter((record) => record.status === 'approved').length
       );
+
+      setCompletions(rows);
+    }
+
+    if (suggestionRes.error) {
+      console.error('Error al cargar propuestas:', suggestionRes.error);
+    } else {
+      setSuggestions((suggestionRes.data ?? []) as Suggestion[]);
     }
   }, [supabase]);
 
@@ -195,9 +264,7 @@ export default function Home() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          result.error || 'No se pudieron obtener los niveles.'
-        );
+        throw new Error(result.error || 'No se pudieron obtener los niveles.');
       }
 
       if (!Array.isArray(result.levels) || result.levels.length !== 150) {
@@ -232,15 +299,13 @@ export default function Home() {
       setAredlMessage('Importación completada: 150 niveles guardados.');
     } catch (error) {
       setAredlMessage(
-        error instanceof Error
-          ? error.message
-          : 'Error al importar AREDL.'
+        error instanceof Error ? error.message : 'Error al importar AREDL.'
       );
     } finally {
       setImportingAredl(false);
     }
   }
-  
+
   async function searchAredl() {
     const query = aredlSearch.trim();
 
@@ -257,7 +322,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from('aredl_catalog')
-        .select('aredl_id, name, position, gd_level_id, points')
+        .select('aredl_id,name,position,gd_level_id,points')
         .ilike('name', `%${query}%`)
         .order('position', { ascending: true })
         .limit(10);
@@ -275,9 +340,11 @@ export default function Home() {
     }
   }
 
-
   async function addLevel(e: FormEvent) {
     e.preventDefault();
+
+    if (!isAdmin) return;
+
     setBusy(true);
     setMessage('');
 
@@ -287,7 +354,7 @@ export default function Home() {
       difficulty,
       gd_url: gdUrl.trim() || null,
       image_url: imageUrl.trim() || null,
-      position: Math.max(0, ...levels.map((l) => l.position)) + 1,
+      position: Math.max(0, ...levels.map((level) => level.position)) + 1,
     });
 
     setBusy(false);
@@ -302,6 +369,165 @@ export default function Home() {
     setGdUrl('');
     setImageUrl('');
     setMessage('Nivel agregado correctamente.');
+    await load();
+  }
+
+  function startEditingLevel(level: Level) {
+    setEditingLevelId(level.id);
+    setEditName(level.name);
+    setEditCreator(level.creator || '');
+    setEditDifficulty(level.difficulty);
+    setEditGdUrl(level.gd_url || '');
+    setEditImageUrl(level.image_url || '');
+    setEditPosition(String(level.position));
+    setTab('admin');
+    setMessage(`Editando: ${level.name}`);
+  }
+
+  async function saveLevelEdit(e: FormEvent) {
+    e.preventDefault();
+
+    if (!isAdmin || !editingLevelId) {
+      setMessage('No tenés permisos para editar niveles.');
+      return;
+    }
+
+    if (!editName.trim()) {
+      setMessage('El nombre del nivel es obligatorio.');
+      return;
+    }
+
+    const targetPosition = Number(editPosition);
+
+    if (
+      !Number.isInteger(targetPosition) ||
+      targetPosition < 1 ||
+      targetPosition > levels.length
+    ) {
+      setMessage(`La posición debe ser un número entre 1 y ${levels.length}.`);
+      return;
+    }
+
+    const current = levels.find((level) => level.id === editingLevelId);
+
+    if (!current) {
+      setMessage('No se encontró el nivel que querés editar.');
+      return;
+    }
+
+    setBusy(true);
+    setMessage('');
+
+    const temporary =
+      Math.max(0, ...levels.map((level) => level.position)) + 10000;
+
+    const first = await supabase
+      .from('levels')
+      .update({ position: temporary })
+      .eq('id', editingLevelId);
+
+    if (first.error) {
+      setBusy(false);
+      setMessage('No se pudo preparar la edición: ' + first.error.message);
+      return;
+    }
+
+    const ordered = [...levels].sort((a, b) => a.position - b.position);
+    const oldIndex = ordered.findIndex((level) => level.id === editingLevelId);
+    const targetIndex = targetPosition - 1;
+
+    ordered.splice(oldIndex, 1);
+    ordered.splice(targetIndex, 0, current);
+
+    for (let index = 0; index < ordered.length; index++) {
+      const level = ordered[index];
+
+      const { error } = await supabase
+        .from('levels')
+        .update({ position: 100000 + index + 1 })
+        .eq('id', level.id);
+
+      if (error) {
+        setBusy(false);
+        setMessage('No se pudo reordenar el catálogo: ' + error.message);
+        await load();
+        return;
+      }
+    }
+
+    for (let index = 0; index < ordered.length; index++) {
+      const level = ordered[index];
+      const update: Record<string, unknown> = { position: index + 1 };
+
+      if (level.id === editingLevelId) {
+        Object.assign(update, {
+          name: editName.trim(),
+          creator: editCreator.trim() || null,
+          difficulty: editDifficulty,
+          gd_url: editGdUrl.trim() || null,
+          image_url: editImageUrl.trim() || null,
+        });
+      }
+
+      const { error } = await supabase
+        .from('levels')
+        .update(update)
+        .eq('id', level.id);
+
+      if (error) {
+        setBusy(false);
+        setMessage('No se pudo guardar el cambio: ' + error.message);
+        await load();
+        return;
+      }
+    }
+
+    setBusy(false);
+    setEditingLevelId('');
+    setMessage('Tarjeta y posición actualizadas.');
+    await load();
+  }
+
+  async function moveLevel(level: Level, delta: number) {
+    if (!isAdmin) return;
+
+    const ordered = [...levels].sort((a, b) => a.position - b.position);
+    const i = ordered.findIndex((item) => item.id === level.id);
+    const j = i + delta;
+
+    if (j < 0 || j >= ordered.length) return;
+
+    const other = ordered[j];
+    const temporary =
+      Math.max(...ordered.map((item) => item.position), 0) + 10000;
+
+    const a = await supabase
+      .from('levels')
+      .update({ position: temporary })
+      .eq('id', level.id);
+
+    const b = a.error
+      ? null
+      : await supabase
+          .from('levels')
+          .update({ position: level.position })
+          .eq('id', other.id);
+
+    const c =
+      !b || b.error
+        ? null
+        : await supabase
+            .from('levels')
+            .update({ position: other.position })
+            .eq('id', level.id);
+
+    setMessage(
+      a.error?.message ||
+        b?.error?.message ||
+        c?.error?.message ||
+        'Ranking actualizado.'
+    );
+
     await load();
   }
 
@@ -332,13 +558,13 @@ export default function Home() {
       return;
     }
 
-    const existingSuggestion = suggestions.find(
+    const duplicate = suggestions.find(
       (suggestion) =>
         suggestion.name.trim().toLowerCase() === name.toLowerCase() &&
         suggestion.status === 'pending'
     );
 
-    if (existingSuggestion) {
+    if (duplicate) {
       setMessage('Ya hay una propuesta pendiente con ese nombre.');
       return;
     }
@@ -374,7 +600,7 @@ export default function Home() {
   }
 
   async function reviewSuggestion(
-    suggestion: LevelSuggestion,
+    suggestion: Suggestion,
     status: 'approved' | 'rejected'
   ) {
     if (!isAdmin) {
@@ -393,67 +619,41 @@ export default function Home() {
       );
 
       if (!duplicate) {
-        const { error: insertError } = await supabase.from('levels').insert({
+        const { error } = await supabase.from('levels').insert({
           name: suggestion.name.trim(),
           creator: suggestion.creator,
           difficulty: suggestion.difficulty,
           gd_url: suggestion.gd_url,
           image_url: suggestion.image_url,
-          position: Math.max(0, ...levels.map((l) => l.position)) + 1,
+          position: Math.max(0, ...levels.map((level) => level.position)) + 1,
         });
 
-        if (insertError) {
+        if (error) {
           setBusy(false);
-          setMessage('No se pudo publicar el nivel: ' + insertError.message);
+          setMessage('No se pudo publicar el nivel: ' + error.message);
           return;
         }
       }
-
-      const { error } = await supabase
-        .from('level_suggestions')
-        .update({
-          status: 'approved',
-          reviewed_by: userId,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq('id', suggestion.id);
-
-      setBusy(false);
-
-      if (error) {
-        setMessage(
-          'El nivel se agregó, pero no se pudo actualizar la propuesta: ' +
-            error.message
-        );
-        await load();
-        return;
-      }
-
-      setMessage(
-        duplicate
-          ? 'La propuesta fue aprobada. El nivel ya existía en el ranking.'
-          : 'Nivel aprobado y agregado al ranking.'
-      );
-    } else {
-      const { error } = await supabase
-        .from('level_suggestions')
-        .update({
-          status: 'rejected',
-          reviewed_by: userId,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq('id', suggestion.id);
-
-      setBusy(false);
-
-      if (error) {
-        setMessage('No se pudo rechazar la propuesta: ' + error.message);
-        return;
-      }
-
-      setMessage('Propuesta rechazada.');
     }
 
+    const { error } = await supabase
+      .from('level_suggestions')
+      .update({
+        status,
+        reviewed_by: userId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', suggestion.id);
+
+    setBusy(false);
+
+    if (error) {
+      setMessage('No se pudo actualizar la propuesta: ' + error.message);
+      await load();
+      return;
+    }
+
+    setMessage(status === 'approved' ? 'Propuesta aprobada.' : 'Propuesta rechazada.');
     await load();
   }
 
@@ -473,19 +673,67 @@ export default function Home() {
     setBusy(true);
     setMessage('');
 
-    const { error } = await supabase.from('completions').insert({
-      user_id: userId,
-      level_id: selectedLevel,
-      proof_url: proof.trim() || null,
-      attempts: attempts ? Number(attempts) : null,
-      notes: notes.trim() || null,
-      status: 'pending',
-    });
+    const { data: existing, error: findError } = await supabase
+      .from('completions')
+      .select('id,status')
+      .eq('user_id', userId)
+      .eq('level_id', selectedLevel)
+      .maybeSingle();
+
+    if (findError) {
+      setBusy(false);
+      setMessage('No se pudo comprobar el récord: ' + findError.message);
+      return;
+    }
+
+    if (existing?.status === 'approved') {
+      setBusy(false);
+      setMessage('Ya tenés este nivel registrado como completado.');
+      return;
+    }
+
+    if (existing?.status === 'pending') {
+      setBusy(false);
+      setMessage('Ya tenés un récord pendiente de revisión para este nivel.');
+      return;
+    }
+
+    let error;
+
+    if (existing) {
+      // Reenvía un récord rechazado sin crear una fila duplicada.
+      ({ error } = await supabase
+        .from('completions')
+        .update({
+          proof_url: proof.trim() || null,
+          attempts: attempts ? Number(attempts) : null,
+          notes: notes.trim() || null,
+          status: 'pending',
+          reviewed_by: null,
+          reviewed_at: null,
+        })
+        .eq('id', existing.id));
+    } else {
+      ({ error } = await supabase.from('completions').insert({
+        user_id: userId,
+        level_id: selectedLevel,
+        proof_url: proof.trim() || null,
+        attempts: attempts ? Number(attempts) : null,
+        notes: notes.trim() || null,
+        status: 'pending',
+      }));
+    }
 
     setBusy(false);
 
     if (error) {
-      setMessage('No se pudo enviar el récord: ' + error.message);
+      if (error.code === '23505') {
+        setMessage(
+          'Ya existe un récord para ese nivel. Actualizá la página y comprobá su estado.'
+        );
+      } else {
+        setMessage('No se pudo enviar el récord: ' + error.message);
+      }
       return;
     }
 
@@ -499,6 +747,8 @@ export default function Home() {
   }
 
   async function moderate(id: string, status: 'approved' | 'rejected') {
+    if (!isAdmin) return;
+
     const { error } = await supabase
       .from('completions')
       .update({
@@ -519,73 +769,135 @@ export default function Home() {
     await load();
   }
 
-  async function moveLevel(level: Level, delta: number) {
-    const ordered = [...levels].sort((a, b) => a.position - b.position);
-    const i = ordered.findIndex((item) => item.id === level.id);
-    const j = i + delta;
+  async function setManualCompletion() {
+    if (!isAdmin || !manualPlayerId || !manualLevelId) {
+      setMessage('Elegí un jugador y un nivel.');
+      return;
+    }
 
-    if (j < 0 || j >= ordered.length) return;
+    setBusy(true);
+    setMessage('');
 
-    const other = ordered[j];
-    const temporary =
-      Math.max(...ordered.map((item) => item.position), 0) + 1000;
+    const { data: existing, error: findError } = await supabase
+      .from('completions')
+      .select('id')
+      .eq('user_id', manualPlayerId)
+      .eq('level_id', manualLevelId)
+      .maybeSingle();
 
-    const a = await supabase
-      .from('levels')
-      .update({ position: temporary })
-      .eq('id', level.id);
+    if (findError) {
+      setBusy(false);
+      setMessage('No se pudo comprobar el récord: ' + findError.message);
+      return;
+    }
 
-    const b = a.error
-      ? null
-      : await supabase
-          .from('levels')
-          .update({ position: level.position })
-          .eq('id', other.id);
+    let error;
 
-    const c =
-      !b || b.error
-        ? null
-        : await supabase
-            .from('levels')
-            .update({ position: other.position })
-            .eq('id', level.id);
+    if (existing) {
+      ({ error } = await supabase
+        .from('completions')
+        .update({
+          status: 'approved',
+          reviewed_by: userId,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id));
+    } else {
+      ({ error } = await supabase.from('completions').insert({
+        user_id: manualPlayerId,
+        level_id: manualLevelId,
+        status: 'approved',
+        reviewed_by: userId,
+        reviewed_at: new Date().toISOString(),
+      }));
+    }
+
+    setBusy(false);
+
+    if (error) {
+      setMessage('No se pudo registrar el completado: ' + error.message);
+      return;
+    }
+
+    setMessage('Completado aprobado y asociado al jugador.');
+    await load();
+  }
+
+  async function removeManualCompletion(completion: Completion) {
+    if (!isAdmin) return;
+
+    const { error } = await supabase
+      .from('completions')
+      .update({
+        status: 'rejected',
+        reviewed_by: userId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', completion.id);
 
     setMessage(
-      a.error?.message ||
-        b?.error?.message ||
-        c?.error?.message ||
-        'Ranking actualizado.'
+      error
+        ? 'No se pudo quitar el récord: ' + error.message
+        : 'Récord quitado del ranking. El registro queda conservado como rechazado.'
     );
 
     await load();
   }
 
   const approved = useMemo(
-    () => completions.filter((c) => c.status === 'approved'),
+    () => completions.filter((completion) => completion.status === 'approved'),
     [completions]
   );
 
+  const pending = useMemo(
+    () => completions.filter((completion) => completion.status === 'pending'),
+    [completions]
+  );
+
+  const pendingSuggestions = useMemo(
+    () => suggestions.filter((suggestion) => suggestion.status === 'pending'),
+    [suggestions]
+  );
+
+  const nameFor = (id: string) =>
+    profiles.find((profile) => profile.id === id)?.username || 'Jugador';
+
+  const visibleLevels = levels.filter((level) =>
+    (level.name + ' ' + (level.creator || '') + ' ' + level.difficulty)
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
+  const matchingLevels = levels.filter((level) =>
+    level.name.toLowerCase().includes(levelSearch.trim().toLowerCase())
+  );
+
+  // Ranking: cuenta niveles únicos aprobados y suma puntos según la posición.
   const playerRanking = useMemo(() => {
+    const levelPositions = new Map(
+      levels.map((level) => [level.id, level.position])
+    );
+
     return profiles
       .map((profile) => {
-        const completedLevels = new Set(
+        const completedIds = new Set(
           approved
             .filter((record) => record.user_id === profile.id)
             .map((record) => record.level_id)
         );
 
-        const points = [...completedLevels].reduce((total, levelId) => {
-          const level = levels.find((item) => item.id === levelId);
+        const points = [...completedIds].reduce((total, levelId) => {
+          const position = levelPositions.get(levelId);
 
-          if (!level || level.position < 1) return total;
+          if (position === undefined || position < 1) return total;
 
-          return total + Math.round(1000 / Math.sqrt(level.position));
+          return total + Math.round(1000 / Math.sqrt(position));
         }, 0);
 
         return {
           id: profile.id,
           username: profile.username || 'Jugador',
-          completed: completedLevels.size,
+          completed: completedIds.size,
           points,
         };
       })
@@ -597,33 +909,18 @@ export default function Home() {
       );
   }, [profiles, approved, levels]);
 
-  const visibleLevels = levels.filter((l) =>
-    (l.name + ' ' + (l.creator || '') + ' ' + l.difficulty)
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
-
-  const matchingLevels = levels.filter((level) =>
-    level.name.toLowerCase().includes(levelSearch.trim().toLowerCase())
-  );
-
   const counts = useMemo(() => {
-    const m = new Map<string, number>();
+    const result = new Map<string, number>();
 
-    approved.forEach((c) => {
-      m.set(c.user_id, (m.get(c.user_id) || 0) + 1);
+    approved.forEach((completion) => {
+      result.set(
+        completion.user_id,
+        (result.get(completion.user_id) || 0) + 1
+      );
     });
 
-    return m;
+    return result;
   }, [approved]);
-
-  const pending = completions.filter((c) => c.status === 'pending');
-  const pendingSuggestions = suggestions.filter(
-    (s) => s.status === 'pending'
-  );
-
-  const nameFor = (id: string) =>
-    profiles.find((p) => p.id === id)?.username || 'Jugador';
 
   return (
     <main className="shell">
@@ -640,17 +937,16 @@ export default function Home() {
           {userId ? (
             <>
               <span className="user-pill">
-                {email}
-                {isAdmin ? ' · ADMIN' : ''}
+                {email}{isAdmin ? ' · ADMIN' : ''}
               </span>
-              <button className="btn" onClick={signOut}>
-                Salir
-              </button>
+              <button className="btn" onClick={signOut}>Salir</button>
             </>
           ) : (
             <button
               className="btn primary"
-              onClick={() => (window.location.href = '/login?next=/')}
+              onClick={() => {
+                window.location.href = '/login?next=/';
+              }}
             >
               Iniciar sesión
             </button>
@@ -660,6 +956,7 @@ export default function Home() {
 
       <section className="hero">
         <h2>Familia GD Demon List</h2>
+        <p>Ranking comunitario. La posición 1 representa el nivel más difícil.</p>
       </section>
 
       {message && (
@@ -730,17 +1027,18 @@ export default function Home() {
                 <th>Dificultad</th>
                 <th>Récords</th>
                 <th>Enlace</th>
-                {isAdmin && <th>Orden</th>}
+                {isAdmin && <th>Administrar</th>}
               </tr>
             </thead>
             <tbody>
               {visibleLevels.map((level) => {
                 const records = approved.filter(
-                  (c) => c.level_id === level.id
+                  (completion) => completion.level_id === level.id
                 );
-                const uniquePlayers = records
-                  .map((c) => nameFor(c.user_id))
-                  .filter((name, i, arr) => arr.indexOf(name) === i);
+
+                const uniquePlayers = [
+                  ...new Set(records.map((record) => nameFor(record.user_id))),
+                ];
 
                 return (
                   <tr key={level.id}>
@@ -812,14 +1110,21 @@ export default function Home() {
                         <div className="actions">
                           <button
                             className="small-btn"
-                            title="Subir"
+                            title="Editar tarjeta"
+                            onClick={() => startEditingLevel(level)}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            className="small-btn"
+                            title="Subir, hacia niveles más difíciles"
                             onClick={() => moveLevel(level, -1)}
                           >
                             ↑
                           </button>
                           <button
                             className="small-btn"
-                            title="Bajar"
+                            title="Bajar, hacia niveles más fáciles"
                             onClick={() => moveLevel(level, 1)}
                           >
                             ↓
@@ -832,6 +1137,7 @@ export default function Home() {
               })}
             </tbody>
           </table>
+
           {!visibleLevels.length && (
             <div className="empty">
               No hay niveles que coincidan con la búsqueda.
@@ -871,15 +1177,15 @@ export default function Home() {
               ))}
             </tbody>
           </table>
+
           {!playerRanking.length && (
-            <div className="empty">
-              Todavía no hay jugadores registrados.
-            </div>
+            <div className="empty">Todavía no hay jugadores registrados.</div>
           )}
+
           <div className="notice">
             Los puntos se calculan con los récords aprobados. Cada nivel suma
             puntos una sola vez por jugador. Fórmula: redondeo de 1000 ÷ raíz
-            cuadrada de la posición.
+            cuadrada de la posición. La posición 1 da más puntos.
           </div>
         </div>
       )}
@@ -897,7 +1203,9 @@ export default function Home() {
                 </p>
                 <button
                   className="btn primary"
-                  onClick={() => (window.location.href = '/login?next=/')}
+                  onClick={() => {
+                    window.location.href = '/login?next=/';
+                  }}
                 >
                   Iniciar sesión
                 </button>
@@ -905,8 +1213,8 @@ export default function Home() {
             ) : (
               <>
                 <p>
-                  Buscá el nivel por nombre. Si todavía no existe, podés
-                  proponerlo para que un administrador lo revise.
+                  Buscá el nivel. Si no existe, podés proponerlo para que un
+                  administrador lo revise.
                 </p>
 
                 <form onSubmit={submitRecord}>
@@ -915,22 +1223,23 @@ export default function Home() {
                       <label htmlFor="levelSearch">Buscar nivel</label>
                       <input
                         id="levelSearch"
-                        type="text"
-                        autoComplete="off"
                         value={levelSearch}
-                        placeholder="Escribí el nombre del nivel..."
-                        onChange={(e) => {
-                          setLevelSearch(e.target.value);
+                        onChange={(event) => {
+                          setLevelSearch(event.target.value);
                           setSelectedLevel('');
                           setShowProposal(false);
                         }}
+                        placeholder="Escribí el nombre del nivel..."
+                        autoComplete="off"
                       />
 
                       {selectedLevel && (
                         <div className="notice">
                           Nivel seleccionado:{' '}
                           <strong>
-                            {levels.find((l) => l.id === selectedLevel)?.name}
+                            {levels.find(
+                              (level) => level.id === selectedLevel
+                            )?.name}
                           </strong>
                           <button
                             type="button"
@@ -948,11 +1257,7 @@ export default function Home() {
                       {levelSearch.trim() && !selectedLevel && (
                         <div
                           className="level-search-results"
-                          style={{
-                            marginTop: 8,
-                            display: 'grid',
-                            gap: 6,
-                          }}
+                          style={{ marginTop: 8, display: 'grid', gap: 6 }}
                         >
                           {matchingLevels.slice(0, 8).map((level) => (
                             <button
@@ -975,8 +1280,8 @@ export default function Home() {
                           )}
 
                           {!matchingLevels.some(
-                            (l) =>
-                              l.name.trim().toLowerCase() ===
+                            (level) =>
+                              level.name.trim().toLowerCase() ===
                               levelSearch.trim().toLowerCase()
                           ) && (
                             <button
@@ -998,7 +1303,7 @@ export default function Home() {
                         type="number"
                         min="1"
                         value={attempts}
-                        onChange={(e) => setAttempts(e.target.value)}
+                        onChange={(event) => setAttempts(event.target.value)}
                         placeholder="Ej. 842"
                       />
                     </div>
@@ -1009,7 +1314,7 @@ export default function Home() {
                         id="proof"
                         type="url"
                         value={proof}
-                        onChange={(e) => setProof(e.target.value)}
+                        onChange={(event) => setProof(event.target.value)}
                         placeholder="https://youtu.be/..."
                       />
                     </div>
@@ -1019,7 +1324,7 @@ export default function Home() {
                       <input
                         id="notes"
                         value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
+                        onChange={(event) => setNotes(event.target.value)}
                         maxLength={300}
                         placeholder="Porcentaje, fecha, contexto..."
                       />
@@ -1040,11 +1345,6 @@ export default function Home() {
                 {showProposal && (
                   <section className="card" style={{ marginTop: 20 }}>
                     <h3>Proponer un nivel</h3>
-                    <p>
-                      La propuesta no aparecerá en el ranking hasta que la
-                      apruebe un administrador.
-                    </p>
-
                     <form onSubmit={submitSuggestion}>
                       <div className="form-grid">
                         <div className="field full">
@@ -1054,7 +1354,9 @@ export default function Home() {
                             required
                             maxLength={100}
                             value={levelSearch}
-                            onChange={(e) => setLevelSearch(e.target.value)}
+                            onChange={(event) =>
+                              setLevelSearch(event.target.value)
+                            }
                           />
                         </div>
 
@@ -1064,8 +1366,9 @@ export default function Home() {
                             id="proposalCreator"
                             maxLength={100}
                             value={proposalCreator}
-                            onChange={(e) => setProposalCreator(e.target.value)}
-                            placeholder="Opcional"
+                            onChange={(event) =>
+                              setProposalCreator(event.target.value)
+                            }
                           />
                         </div>
 
@@ -1074,38 +1377,40 @@ export default function Home() {
                           <select
                             id="proposalDifficulty"
                             value={proposalDifficulty}
-                            onChange={(e) =>
-                              setProposalDifficulty(e.target.value)
+                            onChange={(event) =>
+                              setProposalDifficulty(event.target.value)
                             }
                           >
-                            {DIFFICULTIES.map((d) => (
-                              <option key={d}>{d}</option>
+                            {DIFFICULTIES.map((item) => (
+                              <option key={item}>{item}</option>
                             ))}
                           </select>
                         </div>
 
                         <div className="field full">
-                          <label htmlFor="proposalUrl">
-                            Link del nivel (opcional)
-                          </label>
+                          <label htmlFor="proposalUrl">Link del nivel</label>
                           <input
                             id="proposalUrl"
                             type="url"
                             value={proposalUrl}
-                            onChange={(e) => setProposalUrl(e.target.value)}
+                            onChange={(event) =>
+                              setProposalUrl(event.target.value)
+                            }
                             placeholder="https://..."
                           />
                         </div>
 
                         <div className="field full">
                           <label htmlFor="proposalImage">
-                            URL de miniatura (opcional)
+                            URL de miniatura
                           </label>
                           <input
                             id="proposalImage"
                             type="url"
                             value={proposalImage}
-                            onChange={(e) => setProposalImage(e.target.value)}
+                            onChange={(event) =>
+                              setProposalImage(event.target.value)
+                            }
                             placeholder="https://..."
                           />
                         </div>
@@ -1132,27 +1437,27 @@ export default function Home() {
 
           <section className="card">
             <h3>Récords aprobados</h3>
-            <p>
-              Solo aparecen aquí los récords aprobados por la administración.
-            </p>
+            <p>Solo aparecen aquí los récords aprobados por la administración.</p>
 
-            {approved.slice(0, 12).map((c) => (
-              <div className="pending" key={c.id}>
+            {approved.slice(0, 12).map((completion) => (
+              <div className="pending" key={completion.id}>
                 <strong>
-                  {c.profiles?.username || nameFor(c.user_id)} ·{' '}
-                  {c.levels?.name ||
-                    levels.find((l) => l.id === c.level_id)?.name}
+                  {nameFor(completion.user_id)} ·{' '}
+                  {levels.find((level) => level.id === completion.level_id)
+                    ?.name || 'Nivel'}
                 </strong>
                 <p>
-                  {c.attempts
-                    ? `${c.attempts.toLocaleString()} intentos · `
+                  {completion.attempts
+                    ? `${completion.attempts.toLocaleString()} intentos · `
                     : ''}
-                  {c.proof_url ? 'Prueba adjunta' : 'Sin prueba adjunta'}
+                  {completion.proof_url
+                    ? 'Prueba adjunta'
+                    : 'Sin prueba adjunta'}
                 </p>
-                {c.proof_url && (
+                {completion.proof_url && (
                   <a
                     className="mono"
-                    href={c.proof_url}
+                    href={completion.proof_url}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -1171,11 +1476,202 @@ export default function Home() {
 
       {tab === 'admin' && isAdmin && (
         <div className="content-grid">
+          {editingLevelId && (
+            <section className="card">
+              <h3>Editar tarjeta</h3>
+              <p>
+                Podés cambiar los datos, la thumbnail y la posición. Posición 1
+                es el nivel más difícil.
+              </p>
+
+              <form onSubmit={saveLevelEdit}>
+                <div className="form-grid">
+                  <div className="field full">
+                    <label htmlFor="editName">Nombre</label>
+                    <input
+                      id="editName"
+                      required
+                      maxLength={100}
+                      value={editName}
+                      onChange={(event) => setEditName(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="editCreator">Creador</label>
+                    <input
+                      id="editCreator"
+                      maxLength={100}
+                      value={editCreator}
+                      onChange={(event) => setEditCreator(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="editDifficulty">Dificultad</label>
+                    <select
+                      id="editDifficulty"
+                      value={editDifficulty}
+                      onChange={(event) => setEditDifficulty(event.target.value)}
+                    >
+                      {DIFFICULTIES.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="editPosition">Posición</label>
+                    <input
+                      id="editPosition"
+                      type="number"
+                      min="1"
+                      max={levels.length}
+                      required
+                      value={editPosition}
+                      onChange={(event) => setEditPosition(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="field full">
+                    <label htmlFor="editGdUrl">Enlace del nivel</label>
+                    <input
+                      id="editGdUrl"
+                      type="url"
+                      value={editGdUrl}
+                      onChange={(event) => setEditGdUrl(event.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
+
+                  <div className="field full">
+                    <label htmlFor="editImageUrl">URL de thumbnail</label>
+                    <input
+                      id="editImageUrl"
+                      type="url"
+                      value={editImageUrl}
+                      onChange={(event) => setEditImageUrl(event.target.value)}
+                      placeholder="https://.../imagen.jpg"
+                    />
+                    {editImageUrl && (
+                      <img
+                        className="level-detail-image"
+                        src={editImageUrl}
+                        alt={`Vista previa de ${editName}`}
+                        style={{ maxHeight: 220, marginTop: 8 }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="form-actions">
+                  <button className="btn primary" disabled={busy}>
+                    {busy ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => setEditingLevelId('')}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          <section className="card">
+            <h3>Administrar completados</h3>
+            <p>
+              Agregá o quitá un completado aprobado de un jugador. Quitar no
+              borra el historial: cambia el récord a rechazado.
+            </p>
+
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="manualPlayer">Jugador</label>
+                <select
+                  id="manualPlayer"
+                  value={manualPlayerId}
+                  onChange={(event) => setManualPlayerId(event.target.value)}
+                >
+                  <option value="">Elegir jugador...</option>
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.username || 'Jugador'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor="manualLevel">Nivel</label>
+                <select
+                  id="manualLevel"
+                  value={manualLevelId}
+                  onChange={(event) => setManualLevelId(event.target.value)}
+                >
+                  <option value="">Elegir nivel...</option>
+                  {[...levels]
+                    .sort((a, b) => a.position - b.position)
+                    .map((level) => (
+                      <option key={level.id} value={level.id}>
+                        #{level.position} · {level.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button
+                className="btn primary"
+                disabled={busy || !manualPlayerId || !manualLevelId}
+                onClick={setManualCompletion}
+              >
+                {busy ? 'Guardando...' : 'Marcar como completado'}
+              </button>
+            </div>
+
+            <hr />
+
+            <h3>Récords aprobados por nivel</h3>
+
+            {levels.map((level) => {
+              const levelRecords = approved.filter(
+                (completion) => completion.level_id === level.id
+              );
+
+              if (!levelRecords.length) return null;
+
+              return (
+                <div className="pending" key={level.id}>
+                  <strong>
+                    #{level.position} · {level.name}
+                  </strong>
+                  {levelRecords.map((completion) => (
+                    <div key={completion.id} className="pending-actions">
+                      <span>{nameFor(completion.user_id)}</span>
+                      <button
+                        className="btn danger"
+                        disabled={busy}
+                        onClick={() => removeManualCompletion(completion)}
+                      >
+                        Quitar récord
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </section>
+
           <section className="card">
             <h3>Catálogo AREDL</h3>
             <p>
               Importa o actualiza los primeros 150 niveles del catálogo AREDL.
-              Esto no modifica el ranking de Familia GD.
+              No modifica el ranking propio.
             </p>
 
             <div className="form-actions">
@@ -1183,7 +1679,7 @@ export default function Home() {
                 type="button"
                 className="btn primary"
                 onClick={importAredl}
-                disabled={!isAdmin || importingAredl}
+                disabled={importingAredl}
               >
                 {importingAredl
                   ? 'Importando...'
@@ -1199,7 +1695,6 @@ export default function Home() {
                     ? 'error'
                     : '')
                 }
-                role="status"
               >
                 {aredlMessage}
               </div>
@@ -1207,11 +1702,144 @@ export default function Home() {
 
             <hr />
 
-            <h3>Propuestas de niveles</h3>
-            <p>
-              Revisá los niveles sugeridos por los miembros. Aprobar uno lo
-              incorpora al final del ranking.
-            </p>
+            <h3>Agregar nivel manualmente</h3>
+
+            <div className="field">
+              <label htmlFor="aredlSearch">Buscar en catálogo AREDL</label>
+              <div className="form-actions">
+                <input
+                  id="aredlSearch"
+                  value={aredlSearch}
+                  onChange={(event) => {
+                    setAredlSearch(event.target.value);
+                    setAredlResults([]);
+                    setSelectedAredl(null);
+                  }}
+                  placeholder="Ej. Tidal Wave, GRIEF..."
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={searchAredl}
+                  disabled={searchingAredl}
+                >
+                  {searchingAredl ? 'Buscando...' : 'Buscar'}
+                </button>
+              </div>
+
+              {aredlResults.map((item) => (
+                <button
+                  type="button"
+                  className="btn"
+                  key={item.aredl_id}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    marginTop: 6,
+                  }}
+                  onClick={() => {
+                    setSelectedAredl(item);
+                    setLevelName(item.name);
+                    setDifficulty('Extreme Demon');
+                    setGdUrl(
+                      item.gd_level_id
+                        ? `https://gdbrowser.com/${item.gd_level_id}`
+                        : ''
+                    );
+                  }}
+                >
+                  #{item.position} · {item.name} · {item.points ?? 'Sin puntos'} puntos
+                </button>
+              ))}
+
+              {selectedAredl && (
+                <p className="notice">
+                  Seleccionado: <strong>{selectedAredl.name}</strong> · AREDL #
+                  {selectedAredl.position} · ID:{' '}
+                  {selectedAredl.gd_level_id || 'No disponible'}
+                </p>
+              )}
+            </div>
+
+            <form onSubmit={addLevel}>
+              <div className="form-grid">
+                <div className="field full">
+                  <label htmlFor="levelName">Nombre</label>
+                  <input
+                    id="levelName"
+                    required
+                    maxLength={100}
+                    value={levelName}
+                    onChange={(event) => setLevelName(event.target.value)}
+                  />
+                </div>
+
+                <div className="field">
+                  <label htmlFor="creator">Creador</label>
+                  <input
+                    id="creator"
+                    maxLength={100}
+                    value={creator}
+                    onChange={(event) => setCreator(event.target.value)}
+                  />
+                </div>
+
+                <div className="field">
+                  <label htmlFor="difficulty">Dificultad</label>
+                  <select
+                    id="difficulty"
+                    value={difficulty}
+                    onChange={(event) => setDifficulty(event.target.value)}
+                  >
+                    {DIFFICULTIES.map((item) => (
+                      <option key={item}>{item}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field full">
+                  <label htmlFor="gdUrl">Link del nivel</label>
+                  <input
+                    id="gdUrl"
+                    type="url"
+                    value={gdUrl}
+                    onChange={(event) => setGdUrl(event.target.value)}
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div className="field full">
+                  <label htmlFor="imageUrl">URL de thumbnail</label>
+                  <input
+                    id="imageUrl"
+                    type="url"
+                    value={imageUrl}
+                    onChange={(event) => setImageUrl(event.target.value)}
+                    placeholder="https://.../imagen.jpg"
+                  />
+                  {imageUrl && (
+                    <img
+                      className="level-detail-image"
+                      src={imageUrl}
+                      alt="Vista previa"
+                      style={{ maxHeight: 180, marginTop: 8 }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="form-actions">
+                <button className="btn primary" disabled={busy}>
+                  {busy ? 'Guardando...' : 'Agregar nivel'}
+                </button>
+              </div>
+            </form>
+
+            <hr />
+
+            <h3>Propuestas pendientes</h3>
 
             {pendingSuggestions.map((suggestion) => (
               <div className="pending" key={suggestion.id}>
@@ -1220,6 +1848,15 @@ export default function Home() {
                   {suggestion.creator || 'Creador no indicado'} ·{' '}
                   {suggestion.difficulty}
                 </p>
+
+                {suggestion.image_url && (
+                  <img
+                    className="level-detail-image"
+                    src={suggestion.image_url}
+                    alt={`Miniatura de ${suggestion.name}`}
+                    style={{ maxHeight: 160 }}
+                  />
+                )}
 
                 {suggestion.gd_url && (
                   <p>
@@ -1234,15 +1871,6 @@ export default function Home() {
                   </p>
                 )}
 
-                {suggestion.image_url && (
-                  <img
-                    className="level-detail-image"
-                    src={suggestion.image_url}
-                    alt={`Miniatura de ${suggestion.name}`}
-                    style={{ maxHeight: 180, marginTop: 8 }}
-                  />
-                )}
-
                 <p className="sub">
                   Propuesto por: {nameFor(suggestion.submitted_by)}
                 </p>
@@ -1253,7 +1881,7 @@ export default function Home() {
                     disabled={busy}
                     onClick={() => reviewSuggestion(suggestion, 'approved')}
                   >
-                    Aprobar nivel
+                    Aprobar
                   </button>
                   <button
                     className="btn danger"
@@ -1269,153 +1897,6 @@ export default function Home() {
             {!pendingSuggestions.length && (
               <div className="empty">No hay propuestas pendientes.</div>
             )}
-
-            <div className="notice">
-              Los miembros pueden proponer niveles, pero solo un administrador
-              puede aprobarlos. La base de datos también debe validar estos
-              permisos.
-            </div>
-
-            <hr />
-
-            
-            <h3>Agregar nivel manualmente</h3>
-            <form onSubmit={addLevel}>
-              <div className="form-grid">
-                <div className="field full">
-                  <label htmlFor="aredlSearch">
-                    Buscar en el catálogo AREDL
-                  </label>
-
-                  <div className="form-actions">
-                    <input
-                      id="aredlSearch"
-                      value={aredlSearch}
-                      onChange={(e) => {
-                        setAredlSearch(e.target.value);
-                        setAredlResults([]);
-                        setSelectedAredl(null);
-                      }}
-                      placeholder="Ej. Tidal Wave, GRIEF..."
-                      autoComplete="off"
-                    />
-
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={searchAredl}
-                      disabled={searchingAredl}
-                    >
-                      {searchingAredl ? 'Buscando...' : 'Buscar'}
-                    </button>
-                  </div>
-
-                  {aredlResults.map((level) => (
-                    <button
-                      type="button"
-                      className="btn"
-                      key={level.aredl_id}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        textAlign: 'left',
-                        marginTop: 6,
-                      }}
-                      onClick={() => {
-                        setSelectedAredl(level);
-                        setLevelName(level.name);
-                        setDifficulty('Extreme Demon');
-                      }}
-                    >
-                      #{level.position} · {level.name} ·{' '}
-                      {level.points ?? 'Sin puntos'} puntos
-                    </button>
-                  ))}
-
-                  {selectedAredl && (
-                    <p className="notice">
-                      Seleccionado: <strong>{selectedAredl.name}</strong>
-                      {' · '}ARED​L #{selectedAredl.position}
-                      {' · '}ID: {selectedAredl.gd_level_id || 'No disponible'}
-                    </p>
-                  )}
-                </div>
-
-                <div className="field full">
-                  <label htmlFor="name">Nombre del nivel</label>
-                  <input
-                    id="name"
-                    required
-                    maxLength={100}
-                    value={levelName}
-                    onChange={(e) => setLevelName(e.target.value)}
-                    placeholder="Ej. Grief"
-                  />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="creator">Creador</label>
-                  <input
-                    id="creator"
-                    maxLength={100}
-                    value={creator}
-                    onChange={(e) => setCreator(e.target.value)}
-                    placeholder="Nombre del creador"
-                  />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="difficulty">Dificultad</label>
-                  <select
-                    id="difficulty"
-                    value={difficulty}
-                    onChange={(e) => setDifficulty(e.target.value)}
-                  >
-                    {DIFFICULTIES.map((d) => (
-                      <option key={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="field full">
-                  <label htmlFor="gdurl">Link del nivel (opcional)</label>
-                  <input
-                    id="gdurl"
-                    type="url"
-                    value={gdUrl}
-                    onChange={(e) => setGdUrl(e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-
-                <div className="field full">
-                  <label htmlFor="imageurl">
-                    URL de la miniatura (opcional)
-                  </label>
-                  <input
-                    id="imageurl"
-                    type="url"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="https://.../miniatura.jpg"
-                  />
-                  {imageUrl && (
-                    <img
-                      className="level-detail-image"
-                      src={imageUrl}
-                      alt="Vista previa de la miniatura"
-                      style={{ maxHeight: 180, marginTop: 8 }}
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="form-actions">
-                <button className="btn primary" disabled={busy}>
-                  {busy ? 'Guardando...' : 'Agregar nivel'}
-                </button>
-              </div>
-            </form>
           </section>
 
           <section className="card">
@@ -1426,27 +1907,26 @@ export default function Home() {
 
             <p>Revisá cada envío antes de aprobarlo.</p>
 
-            {pending.map((c) => (
-              <div className="pending" key={c.id}>
+            {pending.map((completion) => (
+              <div className="pending" key={completion.id}>
                 <strong>
-                  {nameFor(c.user_id)} ·{' '}
-                  {c.levels?.name ||
-                    levels.find((l) => l.id === c.level_id)?.name ||
-                    'Nivel'}
+                  {nameFor(completion.user_id)} ·{' '}
+                  {levels.find((level) => level.id === completion.level_id)
+                    ?.name || 'Nivel'}
                 </strong>
                 <p>
-                  {c.attempts
-                    ? `${c.attempts.toLocaleString()} intentos · `
+                  {completion.attempts
+                    ? `${completion.attempts.toLocaleString()} intentos · `
                     : ''}
-                  {c.notes || 'Sin notas'} ·{' '}
-                  {c.proof_url ? 'Con prueba' : 'Sin prueba'}
+                  {completion.notes || 'Sin notas'} ·{' '}
+                  {completion.proof_url ? 'Con prueba' : 'Sin prueba'}
                 </p>
 
-                {c.proof_url && (
+                {completion.proof_url && (
                   <p>
                     <a
                       className="mono"
-                      href={c.proof_url}
+                      href={completion.proof_url}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -1458,13 +1938,13 @@ export default function Home() {
                 <div className="pending-actions">
                   <button
                     className="btn primary"
-                    onClick={() => moderate(c.id, 'approved')}
+                    onClick={() => moderate(completion.id, 'approved')}
                   >
                     Aprobar
                   </button>
                   <button
                     className="btn danger"
-                    onClick={() => moderate(c.id, 'rejected')}
+                    onClick={() => moderate(completion.id, 'rejected')}
                   >
                     Rechazar
                   </button>
@@ -1478,12 +1958,12 @@ export default function Home() {
 
             <div style={{ marginTop: 22 }}>
               <h3>Miembros</h3>
-              {profiles.map((p) => (
-                <div key={p.id} className="pending">
-                  <strong>{p.username || 'Sin nombre'}</strong>
+              {profiles.map((profile) => (
+                <div key={profile.id} className="pending">
+                  <strong>{profile.username || 'Sin nombre'}</strong>
                   <p>
-                    {p.role === 'admin' ? 'Administrador' : 'Miembro'} ·{' '}
-                    {counts.get(p.id) || 0} récords aprobados
+                    {profile.role === 'admin' ? 'Administrador' : 'Miembro'} ·{' '}
+                    {counts.get(profile.id) || 0} récords aprobados
                   </p>
                 </div>
               ))}
